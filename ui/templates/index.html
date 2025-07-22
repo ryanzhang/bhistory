@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bash 历史浏览器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-4">
+        <h1 class="text-2xl font-bold text-center mb-4">Bash 历史浏览器</h1>
+        
+        <!-- 搜索表单 -->
+        <form method="GET" class="mb-4">
+            <input
+                type="text"
+                name="search"
+                value="{{.Search}}"
+                placeholder="搜索命令..."
+                class="w-full p-2 border rounded"
+            />
+            <button type="submit" class="mt-2 p-2 bg-blue-500 text-white rounded hover:bg-blue-600">搜索</button>
+        </form>
+
+        <!-- 错误信息 -->
+        {{if .Error}}
+            <p class="text-red-500 text-center">{{.Error}}</p>
+        {{end}}
+
+        <!-- 信息区域：显示行数和最近更新时间 -->
+        <div class="mb-4 p-4 bg-white rounded shadow">
+            <p class="text-gray-700">总行数: {{.LineCount}} 显示行数: {{.LineInPage}} Limit: {{.LimitInPage}}</p>
+            <p class="text-gray-700">最近更新时间: {{.LastModified}}</p>
+        </div>
+
+        <!-- 命令列表 -->
+        <div class="bg-white p-4 rounded shadow min-h-[calc(100vh-12rem)] overflow-y-auto">
+            {{if .History}}
+                <ul class="space-y-2">
+                    {{range .History}}
+                        <li class="p-2 bg-gray-50 rounded">{{.}}</li>
+                    {{end}}
+                </ul>
+            {{else}}
+                <p class="text-gray-500 text-center">无匹配命令</p>
+            {{end}}
+        </div>
+    </div>
+</body>
+</html>

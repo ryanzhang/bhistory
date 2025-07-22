@@ -1,0 +1,240 @@
+#!/bin/bash
+#Prompt
+#bhistory 可以用来管理我的bash 命令集合。 可以用来添加命令，导入命令文件，并且使用一个远端服务器来保存这个bash_history文件
+# 1. 下面是要求实现的命令
+##bhistory add "one_command_line"
+##bhistory import bash_file_contain_cli
+##bhistory sync # import from remote to local env and replace local .bash_history file and fish_history file, fish_history的格式要求需要-cmd: 字段
+##bhistory "keywords" # 用于搜索关键字的命令行 可以通过查询.bash_history 因为.bash_history和fish_history 都是同步的
+#2. 远端文件通过ssh 保存到root@kc.gce:/share/bhistory/bash_history 文件中.
+#3. 每次同步是从远端获取文件 然后同步到本地
+#4 请使用bash来实现 并且能够兼容bash 和fish两种环境下的bash执行，以及兼容linux 和macos两种环境下的运行
+#5. 确保bash_history 保持有序，去除重复,删除前置的空格，tab 字符
+#6. 并且设计一种结构，我可以很方便的添加 filter 函数，比如filter1， filter2， filter3 当执行同步的时候它总是会去执行这些filter1 确保他们被过滤掉，同时我可以调用
+## bhistory filter1 进行查看过滤掉的行是哪一些
+
+#!/bin/bash
+
+# bhistory: A script to manage Bash command history with remote storage and filtering
+# Features:
+# - Add single command to local and remote history
+# - Import commands from a file
+# - Sync from remote server to local bash_history and fish_history
+# - Search commands by keywords
+# - Apply custom filters during sync and allow viewing filtered commands
+# Supports Bash and Fish, compatible with Linux and macOS
+
+# Configuration
+REMOTE_USER="root"
+REMOTE_HOST="kb.gce"
+REMOTE_PATH="~/bhistory/bash_history"
+REMOTE_FILE="${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
+BASH_HISTORY="$HOME/.bash_history"
+FISH_HISTORY="$HOME/.local/share/fish/fish_history"
+LOCAL_TEMP="/tmp/bhistory_temp.txt"
+INCLUDE_WHEN="true"  # Add 'when' field to Fish history (recommended)
+SSH_KEY="$HOME/.ssh/id_rsa"  # SSH key for remote access
+
+# Define filter functions (add more as needed)
+FILTERS=("filter_cd")  # Array of filter function names
+
+# Filter: Remove lines starting with '#'
+filter_leadingspace() {
+    grep -v '^ '
+}
+
+# Filter: Remove lines starting with 'cd '
+filter_cd() {
+    grep -v '^cd '
+}
+
+# Check for required commands
+check_dependencies() {
+    local deps=("ssh" "scp" "sed" "sort" "uniq" "awk")
+    for cmd in "${deps[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || { echo "Error: $cmd is required"; exit 1; }
+    done
+    if [[ -n "$FISH_HISTORY" ]]; then
+        command -v fish >/dev/null 2>&1 || echo "Warning: fish not found, Fish history sync may fail"
+    fi
+}
+
+# Ensure history files and directories exist
+setup_files() {
+    mkdir -p "$(dirname "$BASH_HISTORY")" "$(dirname "$FISH_HISTORY")"
+    touch "$BASH_HISTORY" "$FISH_HISTORY"
+}
+
+# Usage information
+usage() {
+    echo "Usage: $0 {add|import|sync|search|filter1|filter2|...} [args]"
+    echo "  add \"command\"                    - Add a single command to history"
+    echo "  import <file>                    - Import commands from a file"
+    echo "  sync                            - Sync from remote to local bash_history and fish_history"
+    echo "  search \"keywords\"               - Search commands containing keywords"
+    echo "  filterX                         - Show commands filtered by filterX (e.g., filter_comments)"
+    exit 1
+}
+
+# Apply all filters to input stream
+apply_filters() {
+    local input="$1"
+    local temp_file="/tmp/bhistory_filter_temp.txt"
+    cp "$input" "$temp_file"
+    for filter in "${FILTERS[@]}"; do
+        if declare -f "$filter" >/dev/null; then
+            cat "$temp_file" | "$filter" > "${temp_file}.tmp"
+            mv "${temp_file}.tmp" "$temp_file"
+        else
+            echo "Warning: Filter $filter not found"
+        fi
+    done
+    cat "$temp_file"
+    rm -f "$temp_file"
+}
+
+# Show commands filtered out by a specific filter
+show_filtered() {
+    local filter="$1"
+    local temp_file="/tmp/bhistory_filter_input.txt"
+    local temp_filtered="/tmp/bhistory_filter_output.txt"
+
+    # Combine local and remote history for filtering
+    if ssh "${REMOTE_USER}@${REMOTE_HOST}" test -f "$REMOTE_PATH"; then
+        scp -q "$REMOTE_FILE" "$temp_file"
+    fi
+
+    # Apply the specific filter and show removed lines
+    if declare -f "$filter" >/dev/null; then
+        cat "$temp_file" | "$filter" > "$temp_filtered"
+        comm -23 <(sort "$temp_file") <(sort "$temp_filtered")
+    else
+        echo "Error: Filter $filter not found"
+        exit 1
+    fi
+    # rm -f "$temp_file" "$temp_filtered" /tmp/bhistory_remote.txt
+}
+
+# Add a single command to local and remote history
+add_command() {
+    local cmd="$1"
+    if [ -z "$cmd" ]; then
+        echo "Error: Command is required for 'add'"
+        usage
+    fi
+
+    # Remove leading/trailing spaces/tabs
+    cmd=$(echo "$cmd" | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+    # Add to local bash_history
+    echo "$cmd" >> "$BASH_HISTORY"
+
+    # Update remote history
+#    ssh "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p $(dirname "$REMOTE_PATH")"
+    echo "$cmd" | ssh "${REMOTE_USER}@${REMOTE_HOST}" "cat >> $REMOTE_PATH"
+
+    echo "Command added: $cmd"
+}
+
+# Import commands from a file
+import_file() {
+    local file="$1"
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
+        echo "Error: Valid input file is required for 'import'"
+        usage
+    fi
+
+    # # Read and append each line to local and remote history
+    # while IFS= read -r cmd; do
+    #     if [ -n "$cmd" ]; then
+    #         add_command "$cmd"
+    #     fi
+    # done < "$file"
+    cat $file | ssh "${REMOTE_USER}@${REMOTE_HOST}" "cat >> $REMOTE_PATH"
+    import_lines=$(wc -l < "$file")
+
+
+    echo "Imported $import_lines commands from $file"
+}
+
+# Sync from remote to local bash_history and fish_history
+sync_history() {
+    # Pull remote history
+    ssh "${REMOTE_USER}@${REMOTE_HOST}" "test -f $REMOTE_PATH" || {
+        echo "Warning: Remote file $REMOTE_PATH not found, creating empty file"
+        ssh "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p $(dirname "$REMOTE_PATH") && touch $REMOTE_PATH"
+    }
+    scp -q "$REMOTE_FILE" "$LOCAL_TEMP" || {
+        echo "Error: Failed to pull remote file $REMOTE_FILE"
+        exit 1
+    }
+
+    # Print line counts before merging
+    local_bash_lines=$(wc -l < "$BASH_HISTORY")
+    remote_lines=$(wc -l < "$LOCAL_TEMP")
+    echo "Before merging: Local bash_history lines: $local_bash_lines, Remote history lines: $remote_lines"
+
+
+    # Combine local and remote history, apply filters, sort, and deduplicate
+    cat "$BASH_HISTORY" "$LOCAL_TEMP" | apply_filters /dev/stdin | sed 's/^[ \t]*//' | sort | uniq > "${BASH_HISTORY}.tmp"
+    cp "${BASH_HISTORY}.tmp" "$BASH_HISTORY"
+    scp -q "${BASH_HISTORY}.tmp" "$REMOTE_FILE" || {
+        echo "Error: Failed to pull remote file $REMOTE_FILE"
+        exit 1
+    }
+
+    remote_lines=$(wc -l < "$BASH_HISTORY".tmp )
+    echo "After merging: history lines: $remote_lines"
+
+    echo "Synced to Bash history ($BASH_HISTORY)"
+
+    # Sync to Fish history
+    if [ -n "$FISH_HISTORY" ]; then
+        cat $LOCAL_TEMP | while IFS= read -r cmd; do if [ -n "$cmd" ]; then echo "- cmd: $cmd"; fi; done > $FISH_HISTORY
+        echo "Synced to Fish history ($FISH_HISTORY)"
+
+        # Reload Fish history
+        # command -v fish >/dev/null 2>&1 && fish -c "history --merge" || echo "Warning: Fish history not reloaded (fish not found)"
+    fi
+
+    # rm -f "$LOCAL_TEMP" "${LOCAL_TEMP}.fish_commands"
+}
+
+# Search commands in local bash_history
+search_commands() {
+    local query="$1"
+    if [ -z "$query" ]; then
+        echo "Error: Search query is required"
+        usage
+    fi
+
+    grep -i "$query" "$BASH_HISTORY" || echo "No matching commands found"
+}
+
+# Main logic
+check_dependencies
+#setup_files
+
+case "$1" in
+    help)
+        usage
+        ;;
+    add)
+        add_command "$2"
+        ;;
+    import)
+        import_file "$2"
+        ;;
+    sync)
+        sync_history
+        ;;
+    search)
+        search_commands "$2"
+        ;;
+    filter*)
+        show_filtered "$1"
+        ;;
+    *)
+        search_commands "$1"
+        ;;
+esac
