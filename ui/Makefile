@@ -9,7 +9,7 @@ all: build
 # Build the Go binary
 build:
 	# mkdir -f bin
-	GOOS=linux go build -o $(BINARY_NAME)-linux main.go
+	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux main.go
 	GOOS=darwin go build -o $(BINARY_NAME)-darwin main.go
 	# GOOS=windows go build -o  $(BINARY_NAME)-windows.exe main.go
 
