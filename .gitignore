@@ -1,2 +1,6 @@
 data
 ui/bin
+**/dev-env.sh
+**/*.crt
+go.sum
+.vscode

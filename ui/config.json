@@ -1,4 +1,7 @@
 {
     "history_path": "/Users/rzhang/workspace/bhistory/data/bash_history",
-    "default_limit": 100
+    "default_limit": 100,
+    "keycloak_url": "https://keycloak.gce:8443/realms/bhistory",
+    "redirect_url": "http://localhost:8080/callback",
+    "keycloak_cert_path": "./keycloak.crt"
 }
