@@ -1,19 +1,4 @@
 #!/bin/bash
-#Prompt
-#bhistory 可以用来管理我的bash 命令集合。 可以用来添加命令，导入命令文件，并且使用一个远端服务器来保存这个bash_history文件
-# 1. 下面是要求实现的命令
-##bhistory add "one_command_line"
-##bhistory import bash_file_contain_cli
-##bhistory sync # import from remote to local env and replace local .bash_history file and fish_history file, fish_history的格式要求需要-cmd: 字段
-##bhistory "keywords" # 用于搜索关键字的命令行 可以通过查询.bash_history 因为.bash_history和fish_history 都是同步的
-#2. 远端文件通过ssh 保存到root@kc.gce:/share/bhistory/bash_history 文件中.
-#3. 每次同步是从远端获取文件 然后同步到本地
-#4 请使用bash来实现 并且能够兼容bash 和fish两种环境下的bash执行，以及兼容linux 和macos两种环境下的运行
-#5. 确保bash_history 保持有序，去除重复,删除前置的空格，tab 字符
-#6. 并且设计一种结构，我可以很方便的添加 filter 函数，比如filter1， filter2， filter3 当执行同步的时候它总是会去执行这些filter1 确保他们被过滤掉，同时我可以调用
-## bhistory filter1 进行查看过滤掉的行是哪一些
-
-#!/bin/bash
 
 # bhistory: A script to manage Bash command history with remote storage and filtering
 # Features:
