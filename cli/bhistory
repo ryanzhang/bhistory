@@ -123,23 +123,52 @@ add_command() {
 
 # Import commands from a file
 import_file() {
-    local file="$1"
-    if [ -z "$file" ] || [ ! -f "$file" ]; then
-        echo "Error: Valid input file is required for 'import'"
+    local input="$1"
+    local file
+    local temp_file
+
+    # Check if input is empty
+    if [ -z "$input" ]; then
+        echo "Error: Valid input is required for 'import'"
         usage
+        return 1
     fi
 
-    # # Read and append each line to local and remote history
-    # while IFS= read -r cmd; do
-    #     if [ -n "$cmd" ]; then
-    #         add_command "$cmd"
-    #     fi
-    # done < "$file"
-    cat $file | ssh "${REMOTE_USER}@${REMOTE_HOST}" "cat >> $REMOTE_PATH"
+    # Handle HTTP/HTTPS URLs
+    if [[ "$input" =~ ^http(s)?:// ]]; then
+        temp_file=$(mktemp /tmp/bhistory.XXXXXX)
+        if ! curl -s -o "$temp_file" "$input"; then
+            echo "Error: Failed to download file from $input"
+            rm -f "$temp_file"
+            return 1
+        fi
+        file="$temp_file"
+    # Handle SCP paths (containing @)
+    elif [[ "$input" =~ @ ]]; then
+        temp_file=$(mktemp /tmp/bhistory.XXXXXX)
+        if ! scp "$input" "$temp_file" >/dev/null 2>&1; then
+            echo "Error: Failed to download file from $input via SCP"
+            rm -f "$temp_file"
+            return 1
+        fi
+        file="$temp_file"
+    # Handle local files
+    elif [ -f "$input" ]; then
+        file="$input"
+    else
+        echo "Error: Valid input file is required for 'import'"
+        usage
+        return 1
+    fi
+
+    # Transfer file content to remote host
+    cat "$file" | ssh "${REMOTE_USER}@${REMOTE_HOST}" "cat >> $REMOTE_PATH"
     import_lines=$(wc -l < "$file")
 
+    # Clean up temporary file if it was used
+    [ -n "$temp_file" ] && rm -f "$temp_file"
 
-    echo "Imported $import_lines commands from $file"
+    echo "Imported $import_lines commands from $input"
 }
 
 # Sync from remote to local bash_history and fish_history
@@ -183,6 +212,21 @@ sync_history() {
     fi
 
     # rm -f "$LOCAL_TEMP" "${LOCAL_TEMP}.fish_commands"
+
+    # 检测如果提供的远程服务器的参数
+    local remote_path="$1"
+    echo $remote_path
+
+    # If remote_path contains @, sync local .bash_history to remote ~/.bash_history
+    if [ -n "$remote_path" ] && [[ "$remote_path" =~ @ ]]; then
+        scp -q "$BASH_HISTORY" "$remote_path:~/.bash_history" || {
+            echo "Error: Failed to copy local bash history to $remote_path:~/.bash_history"
+            return 1
+        }
+        echo "Synced bash history to $remote_path:~/.bash_history, total lines: $remote_lines "
+        return 0
+    fi
+
 }
 
 # Search commands in local bash_history
@@ -196,6 +240,49 @@ search_commands() {
     grep -i "$query" "$BASH_HISTORY" || echo "No matching commands found"
 }
 
+upgrade() {
+    local remote_url="https://raw.githubusercontent.com/ryanzhang/bhistory/refs/heads/main/cli/bhistory"
+    local target_path="/usr/local/bin/bhistory"
+    local temp_file
+
+    # Create a temporary file for downloading
+    temp_file=$(mktemp /tmp/bhistory.XXXXXX)
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to create temporary file"
+        return 1
+    fi
+
+    # Download the latest bhistory script
+    if ! curl -s -o "$temp_file" "$remote_url"; then
+        echo "Error: Failed to download bhistory from $remote_url"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    # Check if the downloaded file is non-empty
+    if [ ! -s "$temp_file" ]; then
+        echo "Error: Downloaded file is empty"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    # Move the downloaded file to /usr/local/bin/bhistory with proper permissions
+    if ! sudo mv "$temp_file" "$target_path"; then
+        echo "Error: Failed to move downloaded file to $target_path"
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    # # Set correct permissions 
+    if ! sudo chmod 755 "$target_path"; then
+        echo "Error: Failed to set permissions or ownership for $target_path"
+        return 1
+    fi
+
+    echo "Successfully upgraded bhistory at $target_path"
+    return 0
+}
+
 # Main logic
 check_dependencies
 #setup_files
@@ -204,6 +291,9 @@ case "$1" in
     help)
         usage
         ;;
+    upgrade)
+        upgrade
+        ;;
     add)
         add_command "$2"
         ;;
@@ -211,7 +301,7 @@ case "$1" in
         import_file "$2"
         ;;
     sync)
-        sync_history
+        sync_history $2
         ;;
     search)
         search_commands "$2"
