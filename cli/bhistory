@@ -21,16 +21,16 @@ INCLUDE_WHEN="true"  # Add 'when' field to Fish history (recommended)
 SSH_KEY="$HOME/.ssh/id_rsa"  # SSH key for remote access
 
 # Define filter functions (add more as needed)
-FILTERS=("filter_cd")  # Array of filter function names
+FILTERS=("filter_history", "filter_cd")  # Array of filter function names
 
 # Filter: Remove lines starting with '#'
-filter_leadingspace() {
-    grep -v '^ '
+filter_history() {
+    grep -v "^\(history\|bhistory\)"
 }
 
 # Filter: Remove lines starting with 'cd '
 filter_cd() {
-    grep -v '^cd '
+    grep -v '^cd'
 }
 
 # Check for required commands
@@ -68,14 +68,14 @@ apply_filters() {
     cp "$input" "$temp_file"
     for filter in "${FILTERS[@]}"; do
         if declare -f "$filter" >/dev/null; then
-            cat "$temp_file" | "$filter" > "${temp_file}.tmp"
+            "$filter" < "$temp_file" > "${temp_file}.tmp"
             mv "${temp_file}.tmp" "$temp_file"
         else
             echo "Warning: Filter $filter not found"
         fi
     done
     cat "$temp_file"
-    rm -f "$temp_file"
+    # rm -f "$temp_file"
 }
 
 # Show commands filtered out by a specific filter
@@ -123,40 +123,40 @@ add_command() {
 
 # Import commands from a file
 import_file() {
-    local input="$1"
+    local input_var="$1"
     local file
     local temp_file
 
-    # Check if input is empty
-    if [ -z "$input" ]; then
-        echo "Error: Valid input is required for 'import'"
+    # Check if input_var is empty
+    if [ -z "$input_var" ]; then
+        echo "Error: Valid input_var is required for 'import'"
         usage
         return 1
     fi
 
     # Handle HTTP/HTTPS URLs
-    if [[ "$input" =~ ^http(s)?:// ]]; then
+    if [[ "$input_var" =~ ^http(s)?:// ]]; then
         temp_file=$(mktemp /tmp/bhistory.XXXXXX)
-        if ! curl -s -o "$temp_file" "$input"; then
-            echo "Error: Failed to download file from $input"
+        if ! curl -s -o "$temp_file" "$input_var"; then
+            echo "Error: Failed to download file from $input_var"
             rm -f "$temp_file"
             return 1
         fi
         file="$temp_file"
     # Handle SCP paths (containing @)
-    elif [[ "$input" =~ @ ]]; then
+    elif [[ "$input_var" =~ @ ]]; then
         temp_file=$(mktemp /tmp/bhistory.XXXXXX)
-        if ! scp "$input" "$temp_file" >/dev/null 2>&1; then
-            echo "Error: Failed to download file from $input via SCP"
+        if ! scp "$input_var:~/.bash_history" "$temp_file" >/dev/null 2>&1; then
+            echo "Error: Failed to download file from $input_var via SCP"
             rm -f "$temp_file"
             return 1
         fi
         file="$temp_file"
     # Handle local files
-    elif [ -f "$input" ]; then
-        file="$input"
+    elif [ -f "$input_var" ]; then
+        file="$input_var"
     else
-        echo "Error: Valid input file is required for 'import'"
+        echo "Error: Valid input_var file is required for 'import'"
         usage
         return 1
     fi
@@ -168,7 +168,7 @@ import_file() {
     # Clean up temporary file if it was used
     [ -n "$temp_file" ] && rm -f "$temp_file"
 
-    echo "Imported $import_lines commands from $input"
+    echo "Imported $import_lines commands from $input_var"
 }
 
 # Sync from remote to local bash_history and fish_history
@@ -190,7 +190,8 @@ sync_history() {
 
 
     # Combine local and remote history, apply filters, sort, and deduplicate
-    cat "$BASH_HISTORY" "$LOCAL_TEMP" | apply_filters /dev/stdin | sed 's/^[ \t]*//' | sort | uniq > "${BASH_HISTORY}.tmp"
+    cat "$BASH_HISTORY" "$LOCAL_TEMP" > /tmp/combined_history.txt
+    apply_filters /tmp/combined_history.txt | sed 's/^[ \t]*//' | sort | uniq > "${BASH_HISTORY}.tmp"
     cp "${BASH_HISTORY}.tmp" "$BASH_HISTORY"
     scp -q "${BASH_HISTORY}.tmp" "$REMOTE_FILE" || {
         echo "Error: Failed to pull remote file $REMOTE_FILE"
